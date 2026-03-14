@@ -7,7 +7,7 @@ const FRAME_COUNT = 120; // 0 to 119
 
 export default function ScrollyCanvas({ scrollContainer }: { scrollContainer: React.RefObject<HTMLDivElement> }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [images, setImages] = useState<HTMLImageElement[]>([]);
+  const [images, setImages] = useState<(HTMLImageElement | null)[]>(new Array(FRAME_COUNT).fill(null));
   const [loadedCount, setLoadedCount] = useState(0);
   const [isReady, setIsReady] = useState(false);
   
@@ -20,40 +20,85 @@ export default function ScrollyCanvas({ scrollContainer }: { scrollContainer: Re
   const frameIndex = useTransform(scrollYProgress, [0, 1], [0, FRAME_COUNT - 1]);
 
   useEffect(() => {
-    // Preload all images
-    const loadedImages: HTMLImageElement[] = [];
-    let internalLoadedCount = 0;
-
-    for (let i = 0; i < FRAME_COUNT; i++) {
-      const img = new Image();
-      const paddedIndex = i.toString().padStart(3, '0');
-      // e.g. frame_000_delay-0.066s.png
-      img.src = `/sequence/frame_${paddedIndex}_delay-0.066s.png`;
-      img.onload = () => {
-        internalLoadedCount++;
-        setLoadedCount(internalLoadedCount);
-        
-        if (internalLoadedCount === FRAME_COUNT) {
-          setImages(loadedImages);
-          setIsReady(true);
-          // Draw first frame once loaded
-          if (canvasRef.current) {
-            const ctx = canvasRef.current.getContext('2d');
-            if (ctx && loadedImages[0]) {
-              drawCanvas(ctx, loadedImages[0], canvasRef.current.width, canvasRef.current.height);
-            }
-          }
+    // Load the first frame immediately for fast perceived start
+    const firstImg = new Image();
+    firstImg.src = `/sequence/frame_000_delay-0.066s.png`;
+    firstImg.onload = () => {
+      setImages(prev => {
+        const next = [...prev];
+        next[0] = firstImg;
+        return next;
+      });
+      setLoadedCount(prev => prev + 1);
+      
+      // Draw first frame immediately
+      if (canvasRef.current) {
+        const ctx = canvasRef.current.getContext('2d');
+        if (ctx) {
+          drawCanvas(ctx, firstImg, canvasRef.current.width, canvasRef.current.height);
         }
-      };
-      loadedImages.push(img);
-    }
+      }
+    };
+
+    // Preload remaining images in batches to avoid network bottleneck
+    const loadRemaining = async () => {
+      const BATCH_SIZE = 5;
+      for (let i = 1; i < FRAME_COUNT; i += BATCH_SIZE) {
+        const batch = [];
+        for (let j = i; j < i + BATCH_SIZE && j < FRAME_COUNT; j++) {
+          batch.push(new Promise<void>((resolve) => {
+            const img = new Image();
+            const paddedIndex = j.toString().padStart(3, '0');
+            img.src = `/sequence/frame_${paddedIndex}_delay-0.066s.png`;
+            img.onload = () => {
+              setImages(prev => {
+                const next = [...prev];
+                next[j] = img;
+                return next;
+              });
+              setLoadedCount(prev => prev + 1);
+              resolve();
+            };
+            img.onerror = () => resolve(); // Skip failed images
+          }));
+        }
+        await Promise.all(batch);
+        // Small delay between batches to keep main thread responsive
+        await new Promise(r => setTimeout(r, 20));
+      }
+      setIsReady(true);
+    };
+
+    loadRemaining();
   }, []);
 
   // Update canvas on scroll
   useMotionValueEvent(frameIndex, "change", (latest) => {
-    if (images.length === FRAME_COUNT && canvasRef.current) {
+    if (canvasRef.current) {
       const ctx = canvasRef.current.getContext('2d');
-      const img = images[Math.floor(latest)];
+      const targetIdx = Math.floor(latest);
+      
+      // Fallback logic: find the nearest loaded image
+      let img = images[targetIdx];
+      if (!img) {
+        // Search backwards for the most recent loaded frame
+        for (let i = targetIdx - 1; i >= 0; i--) {
+          if (images[i]) {
+            img = images[i];
+            break;
+          }
+        }
+        // If still nothing, search forwards
+        if (!img) {
+          for (let i = targetIdx + 1; i < FRAME_COUNT; i++) {
+            if (images[i]) {
+              img = images[i];
+              break;
+            }
+          }
+        }
+      }
+      
       if (ctx && img) {
         requestAnimationFrame(() => {
           if (canvasRef.current) {
@@ -73,10 +118,12 @@ export default function ScrollyCanvas({ scrollContainer }: { scrollContainer: Re
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
       
-      if (images.length > 0) {
+      const targetIdx = Math.floor(frameIndex.get());
+      const img = images[targetIdx] || images.find(img => img !== null);
+      
+      if (img) {
         const ctx = canvas.getContext('2d');
-        const img = images[Math.floor(frameIndex.get())];
-        if (ctx && img) {
+        if (ctx) {
            drawCanvas(ctx, img, canvas.width, canvas.height);
         }
       }
