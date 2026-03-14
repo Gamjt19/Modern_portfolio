@@ -22,7 +22,7 @@ export default function ScrollyCanvas({ scrollContainer }: { scrollContainer: Re
   useEffect(() => {
     // Load the first frame immediately for fast perceived start
     const firstImg = new Image();
-    firstImg.src = `/sequence1/frame_000_delay-0.066s.webp`;
+    firstImg.src = `/Sequence1/frame_000_delay-0.066s.webp`;
     firstImg.onload = () => {
       setImages(prev => {
         const next = [...prev];
@@ -51,7 +51,7 @@ export default function ScrollyCanvas({ scrollContainer }: { scrollContainer: Re
           batch.push(new Promise<void>((resolve) => {
             const img = new Image();
             const paddedIndex = j.toString().padStart(3, '0');
-            img.src = `/sequence1/frame_${paddedIndex}_delay-0.066s.webp`;
+            img.src = `/Sequence1/frame_${paddedIndex}_delay-0.066s.webp`;
             img.onload = () => {
               setImages(prev => {
                 const next = [...prev];
