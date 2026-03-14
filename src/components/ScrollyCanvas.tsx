@@ -22,7 +22,7 @@ export default function ScrollyCanvas({ scrollContainer }: { scrollContainer: Re
   useEffect(() => {
     // Load the first frame immediately for fast perceived start
     const firstImg = new Image();
-    firstImg.src = `/sequence/frame_000_delay-0.066s.png`;
+    firstImg.src = `/sequence1/frame_000_delay-0.066s.webp`;
     firstImg.onload = () => {
       setImages(prev => {
         const next = [...prev];
@@ -42,21 +42,30 @@ export default function ScrollyCanvas({ scrollContainer }: { scrollContainer: Re
 
     // Preload remaining images in batches to avoid network bottleneck
     const loadRemaining = async () => {
-      const BATCH_SIZE = 5;
+      const BATCH_SIZE = 10;
+      const REVEAL_THRESHOLD = 18; // ~15% of 120 frames
+      
       for (let i = 1; i < FRAME_COUNT; i += BATCH_SIZE) {
         const batch = [];
         for (let j = i; j < i + BATCH_SIZE && j < FRAME_COUNT; j++) {
           batch.push(new Promise<void>((resolve) => {
             const img = new Image();
             const paddedIndex = j.toString().padStart(3, '0');
-            img.src = `/sequence/frame_${paddedIndex}_delay-0.066s.png`;
+            img.src = `/sequence1/frame_${paddedIndex}_delay-0.066s.webp`;
             img.onload = () => {
               setImages(prev => {
                 const next = [...prev];
                 next[j] = img;
                 return next;
               });
-              setLoadedCount(prev => prev + 1);
+              setLoadedCount(prev => {
+                const newCount = prev + 1;
+                // Reveal site once threshold is met
+                if (newCount >= REVEAL_THRESHOLD && !isReady) {
+                  setIsReady(true);
+                }
+                return newCount;
+              });
               resolve();
             };
             img.onerror = () => resolve(); // Skip failed images
@@ -64,8 +73,9 @@ export default function ScrollyCanvas({ scrollContainer }: { scrollContainer: Re
         }
         await Promise.all(batch);
         // Small delay between batches to keep main thread responsive
-        await new Promise(r => setTimeout(r, 20));
+        await new Promise(r => setTimeout(r, 10));
       }
+      // Guarantee reveal at the end even if threshold logic somehow missed
       setIsReady(true);
     };
 
