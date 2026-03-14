@@ -20,9 +20,19 @@ export default function ScrollyCanvas({ scrollContainer }: { scrollContainer: Re
   const frameIndex = useTransform(scrollYProgress, [0, 1], [0, FRAME_COUNT - 1]);
 
   useEffect(() => {
+    // Fail-safe: Reveal site after 5 seconds no matter what to prevent a permanent blank screen
+    const timeout = setTimeout(() => {
+      if (!isReady) {
+        console.warn('Loading timeout reached - forcing reveal');
+        setIsReady(true);
+      }
+    }, 8000);
+
     // Load the first frame immediately for fast perceived start
     const firstImg = new Image();
-    firstImg.src = `/Sequence1/frame_000_delay-0.066s.webp`;
+    const firstFramePath = `/Sequence1/frame_000_delay-0.066s.webp`;
+    firstImg.src = firstFramePath;
+    
     firstImg.onload = () => {
       setImages(prev => {
         const next = [...prev];
@@ -40,10 +50,16 @@ export default function ScrollyCanvas({ scrollContainer }: { scrollContainer: Re
       }
     };
 
+    firstImg.onerror = () => {
+      console.error(`Failed to load priority first frame: ${firstFramePath}`);
+    };
+
     // Preload remaining images in batches to avoid network bottleneck
     const loadRemaining = async () => {
-      const BATCH_SIZE = 10;
-      const REVEAL_THRESHOLD = 18; // ~15% of 120 frames
+      const BATCH_SIZE = 15;
+      const REVEAL_THRESHOLD = 15; // Even lower to get the site visible faster
+      
+      console.log('Starting background image preloading...');
       
       for (let i = 1; i < FRAME_COUNT; i += BATCH_SIZE) {
         const batch = [];
@@ -51,7 +67,9 @@ export default function ScrollyCanvas({ scrollContainer }: { scrollContainer: Re
           batch.push(new Promise<void>((resolve) => {
             const img = new Image();
             const paddedIndex = j.toString().padStart(3, '0');
-            img.src = `/Sequence1/frame_${paddedIndex}_delay-0.066s.webp`;
+            const path = `/Sequence1/frame_${paddedIndex}_delay-0.066s.webp`;
+            img.src = path;
+            
             img.onload = () => {
               setImages(prev => {
                 const next = [...prev];
@@ -68,18 +86,24 @@ export default function ScrollyCanvas({ scrollContainer }: { scrollContainer: Re
               });
               resolve();
             };
-            img.onerror = () => resolve(); // Skip failed images
+            
+            img.onerror = () => {
+              console.error(`Failed to load image at: ${path}`);
+              resolve(); // Skip failed images but resolve promise to continue batch
+            };
           }));
         }
         await Promise.all(batch);
-        // Small delay between batches to keep main thread responsive
-        await new Promise(r => setTimeout(r, 10));
+        // Minimal delay between batches
+        await new Promise(r => setTimeout(r, 5));
       }
-      // Guarantee reveal at the end even if threshold logic somehow missed
+      
+      console.log('Image sequence preloading complete.');
       setIsReady(true);
     };
 
     loadRemaining();
+    return () => clearTimeout(timeout);
   }, []);
 
   // Update canvas on scroll
